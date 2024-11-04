@@ -1,0 +1,10 @@
+export TGTG_ACCESS_TOKEN="Accesstoken"
+export TGTG_REFRESH_TOKEN="refreshtoken"
+export TGTG_USER_ID="userid"
+export TGTG_COOKIE="cookie"
+export TELEGRAM_CHAT_ID="tonotify"
+export TELEGRAM_API_KEY="apikey"
+
+
+
+
