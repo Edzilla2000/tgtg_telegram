@@ -19,14 +19,13 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 def get_tgtg_client(email: Optional[str] = None, access_token: Optional[str] = None,
-                    refresh_token: Optional[str] = None, user_id: Optional[str] = None,
+                    refresh_token: Optional[str] = None,
                     cookie: Optional[str] = None) -> TgtgClient:
     """Initialize TgtgClient with credentials from environment variables or parameters."""
     try:
         email = os.getenv('TGTG_EMAIL') or email
         access_token = os.getenv('TGTG_ACCESS_TOKEN') or access_token
         refresh_token = os.getenv('TGTG_REFRESH_TOKEN') or refresh_token
-        user_id = os.getenv('TGTG_USER_ID') or user_id
         cookie = os.getenv('TGTG_COOKIE') or cookie
         
         if email:
@@ -37,7 +36,6 @@ def get_tgtg_client(email: Optional[str] = None, access_token: Optional[str] = N
             return TgtgClient(
                 access_token=access_token,
                 refresh_token=refresh_token,
-                user_id=user_id,
                 cookie=cookie
             )
     except Exception as e:
