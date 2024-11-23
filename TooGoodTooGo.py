@@ -9,6 +9,7 @@ import pytz
 import asyncio
 from typing import Optional
 import logging
+import sys
 
 # Configure logging
 logging.basicConfig(
@@ -17,6 +18,14 @@ logging.basicConfig(
     datefmt='%Y-%m-%d %H:%M:%S'
 )
 logger = logging.getLogger(__name__)
+
+class TGTGError(Exception):
+    """Base exception class for TGTG bot errors"""
+    pass
+
+class TGTGAuthError(TGTGError):
+    """Authentication error"""
+    pass
 
 def get_tgtg_client(email: Optional[str] = None, access_token: Optional[str] = None,
                     refresh_token: Optional[str] = None,
@@ -40,7 +49,7 @@ def get_tgtg_client(email: Optional[str] = None, access_token: Optional[str] = N
             )
     except Exception as e:
         logger.error(f"Failed to initialize TGTG client: {str(e)}")
-        raise
+        raise TGTGError(f"TGTG client initialization failed: {str(e)}")
 
 # Alert history management
 ALERT_HISTORY_FILE = "alert_history.json"
@@ -52,7 +61,7 @@ def load_alert_history():
                 return json.load(f)
         except json.JSONDecodeError as e:
             logger.error(f"Error reading alert history file: {str(e)}")
-            return {}
+            raise TGTGError(f"Failed to read alert history: {str(e)}")
     return {}
 
 def save_alert_history(history):
@@ -61,6 +70,7 @@ def save_alert_history(history):
             json.dump(history, f)
     except Exception as e:
         logger.error(f"Error saving alert history: {str(e)}")
+        raise TGTGError(f"Failed to save alert history: {str(e)}")
 
 def can_send_alert(item_id, history):
     if item_id not in history:
@@ -69,7 +79,6 @@ def can_send_alert(item_id, history):
     last_alert_time = datetime.fromisoformat(history[item_id])
     current_time = datetime.now()
     
-    # Check if 2 hours have passed since the last alert
     return (current_time - last_alert_time) >= timedelta(hours=2)
 
 async def send_messages(bot, chat_id, text_message, latitude, longitude):
@@ -79,7 +88,7 @@ async def send_messages(bot, chat_id, text_message, latitude, longitude):
         logger.info(f"Successfully sent notification for location: {latitude}, {longitude}")
     except Exception as e:
         logger.error(f"Failed to send Telegram message: {str(e)}")
-        raise
+        raise TGTGError(f"Failed to send Telegram message: {str(e)}")
 
 async def run_bot(messages, chat_id, api_key):
     try:
@@ -108,9 +117,14 @@ async def run_bot(messages, chat_id, api_key):
                 )
     except Exception as e:
         logger.error(f"Error in run_bot: {str(e)}")
-        raise
+        raise TGTGError(f"Bot execution failed: {str(e)}")
 
-async def main():
+def check_auth_error(error_str: str) -> bool:
+    """Check if error string indicates an authentication error"""
+    auth_error_indicators = ['401', 'UNAUTHORIZED', 'auth', 'token']
+    return any(indicator.lower() in error_str.lower() for indicator in auth_error_indicators)
+
+async def async_main() -> int:
     try:
         logger.info("Starting TGTG notification bot")
         
@@ -120,7 +134,7 @@ async def main():
         api_key = os.getenv('TELEGRAM_API_KEY')
 
         if not chat_id or not api_key:
-            raise ValueError("Missing required environment variables: TELEGRAM_CHAT_ID or TELEGRAM_API_KEY")
+            raise TGTGError("Missing required environment variables: TELEGRAM_CHAT_ID or TELEGRAM_API_KEY")
 
         # Load alert history
         alert_history = load_alert_history()
@@ -132,7 +146,14 @@ async def main():
         
         # Get favorites from TGTG
         logger.info("Fetching favorites from TGTG")
-        favorites = tgtg_client.get_favorites()
+        try:
+            favorites = tgtg_client.get_favorites()
+        except Exception as e:
+            error_str = str(e)
+            if check_auth_error(error_str):
+                raise TGTGAuthError("TGTG authentication failed - invalid or expired tokens")
+            raise TGTGError(f"Failed to fetch favorites: {error_str}")
+
         logger.info(f"Found {len(favorites)} favorite items")
 
         messages = []
@@ -165,21 +186,32 @@ async def main():
                             "Location: " + str(location.get('latitude')) + "," + str(location.get('longitude'))
                         ]
                         
-                        # Send the alert
                         await run_bot(messages, chat_id, api_key)
                         
-                        # Update the alert history
                         alert_history[item_id] = datetime.now().isoformat()
                         save_alert_history(alert_history)
                         
                         messages = []
             except Exception as e:
                 logger.error(f"Error processing entry for {display_name}: {str(e)}")
-                continue
+                raise TGTGError(f"Error processing entry: {str(e)}")
 
+        return 0
+
+    except TGTGAuthError as e:
+        logger.error(f"Authentication error: {str(e)}")
+        return 1
+    except TGTGError as e:
+        logger.error(f"TGTG error: {str(e)}")
+        return 2
     except Exception as e:
         logger.error(f"Fatal error in main function: {str(e)}")
-        raise
+        return 3
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        exit_code = asyncio.run(async_main())
+        sys.exit(exit_code)
+    except Exception as e:
+        logger.error(f"Critical error: {str(e)}")
+        sys.exit(4)
